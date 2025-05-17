@@ -1,0 +1,225 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import os
+import shap
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+from sklearn.feature_selection import SelectFromModel, RFE
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import shap
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, KFold
+
+
+file_path = r'***.xlsx'
+df = pd.read_excel(file_path)
+selected_columns = [
+    'Fracture_strain','A','B','n','C','Elastic modulus',
+                        'Volume_interface' ,'Interface_thickness', 'Al4C3','Al4Si3', 'Mg2Si',
+                        'Configurations', 'Diameter', 'Volume Fraction','Varience',
+                        'UTS', 'Kt','E'
+]
+
+
+normalization_factors = {col: df[col].max() for col in selected_columns}
+for col in selected_columns:
+    df[col] /= normalization_factors[col]
+
+
+X = df[selected_columns[:15]].values
+y = df[selected_columns[15:]].values
+
+
+X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=A, random_state=4)  
+X_test, X_val, y_test, y_val = train_test_split(X_temp, y_temp, test_size=B, random_state=4)  
+
+
+
+rf_regressor = RandomForestRegressor(n_estimators=C, max_depth=D, min_samples_split=E, random_state=F)
+rf_regressor.fit(X_train, y_train)
+
+
+y_train_pred = rf_regressor.predict(X_train)
+y_test_pred = rf_regressor.predict(X_test)
+y_val_pred = rf_regressor.predict(X_val)
+
+
+def inverse_normalize(data, factors):
+    return data * np.array([factors[col] for col in selected_columns[15:]])
+
+
+y_train_true = inverse_normalize(y_train, normalization_factors)
+y_train_pred = inverse_normalize(y_train_pred, normalization_factors)
+y_test_true = inverse_normalize(y_test, normalization_factors)
+y_test_pred = inverse_normalize(y_test_pred, normalization_factors)
+y_val_true = inverse_normalize(y_val, normalization_factors)
+y_val_pred = inverse_normalize(y_val_pred, normalization_factors)
+
+
+def create_results_df(y_true, y_pred, set_name):
+    return pd.DataFrame({
+        'Set': set_name,
+        'True_UTS': y_true[:, 0],
+        'Predicted_UTS': y_pred[:, 0],
+        'True_Kt': y_true[:, 1],
+        'Predicted_Kt': y_pred[:, 1],
+        'True_E': y_true[:, 2],
+        'Predicted_E': y_pred[:, 2],
+    })
+
+
+train_results = create_results_df(y_train_true, y_train_pred, 'Train')
+test_results = create_results_df(y_test_true, y_test_pred, 'Test')
+val_results = create_results_df(y_val_true, y_val_pred, 'Validation')
+
+
+all_results = pd.concat([train_results, test_results, val_results], ignore_index=True)
+
+
+
+print(all_results)
+
+
+output_file_path = r'****.xlsx'
+all_results.to_excel(output_file_path, index=False)
+print(f"\nsave: {output_file_path}")
+
+# output
+def calculate_metrics(y_true, y_pred):
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
+    mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+    return rmse, mae, r2, mape
+
+
+for i, target in enumerate(['UTS', 'Kt', "E"]):
+    print(f"\n--- {target} ---")
+    print("train：")
+    train_rmse, train_mae, train_r2, train_mape = calculate_metrics(y_train_true[:, i], y_train_pred[:, i])
+    print(f"RMSE: {train_rmse:.4f}, MAE: {train_mae:.4f}, R2: {train_r2:.4f}, MAPE: {train_mape:.2f}%")
+    
+    print("test：")
+    test_rmse, test_mae, test_r2, test_mape = calculate_metrics(y_test_true[:, i], y_test_pred[:, i])
+    print(f"RMSE: {test_rmse:.4f}, MAE: {test_mae:.4f}, R2: {test_r2:.4f}, MAPE: {test_mape:.2f}%")
+    
+    print("validation：")
+    val_rmse, val_mae, val_r2, val_mape = calculate_metrics(y_val_true[:, i], y_val_pred[:, i])
+    print(f"RMSE: {val_rmse:.4f}, MAE: {val_mae:.4f}, R2: {val_r2:.4f}, MAPE: {val_mape:.2f}%")
+
+
+def calculate_overall_metrics(y_true, y_pred):
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(y_true, y_pred)
+    mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+    return rmse, mae, mape
+
+
+print("\n--- test ---")
+test_rmse, test_mae, test_mape = calculate_overall_metrics(y_test_true, y_test_pred)
+print(f"RMSE: {test_rmse:.4f}, MAE: {test_mae:.4f}, MAPE: {test_mape:.2f}%")
+
+print("\n--- validation ---")
+val_rmse, val_mae, val_mape = calculate_overall_metrics(y_val_true, y_val_pred)
+print(f"RMSE: {val_rmse:.4f}, MAE: {val_mae:.4f}, MAPE: {val_mape:.2f}%")
+    
+
+#----------------------------------------Step2：Shap-----------------------------------------------
+
+explainer = shap.Explainer(rf_regressor)
+shap_values = explainer(X_test)
+
+print("Shape of shap_values:", shap_values.values.shape) 
+
+feature_importance_summary = {col: [] for col in selected_columns[:15]}
+plt.figure(figsize=(20, 15)) 
+
+
+# 
+for i in range(y.shape[1]):  
+    print(f"\nProcessing target {i+1} ({selected_columns[15 + i]})...")
+
+    shap_values_i = shap.Explanation(values=shap_values.values[:, :, i], base_values=shap_values.base_values[:, i], data=X_test)
+    
+    shap.summary_plot(shap_values_i, X_test, feature_names=selected_columns[:15], plot_type="bar", show=False)
+    plt.title(f"Feature Importance for target {i+1} ({selected_columns[15 + i]})")
+    plt.tight_layout() 
+    plt.show()
+
+    
+    shap.summary_plot(shap_values_i, X_test, feature_names=selected_columns[:15],plot_type="layered_violin")
+    
+    shap_values_i.feature_names = selected_columns[:15]
+    shap.plots.waterfall(shap_values_i[0], max_display=15)  
+
+    clust = shap.utils.hclust(X_test, y_test[:, i], linkage="single")  
+    shap.plots.bar(shap_values_i, clustering=clust, clustering_cutoff=1)  
+
+    avg_shap_values = np.abs(shap_values_i.values).mean(axis=0)
+    for feature, shap_value in zip(selected_columns[:15], avg_shap_values):
+        feature_importance_summary[feature].append(shap_value)
+
+feature_importance_df = pd.DataFrame(feature_importance_summary, index=[f"Target {i+1} ({col})" for i, col in enumerate(selected_columns[15:])])
+
+
+print("\nFeature Importance Summary:")
+print(feature_importance_df)
+
+
+output_file_path = r'G:\Article_IIII_final\Code\Feature_project\Output\feature_importance_summary.xlsx'
+feature_importance_df.to_excel(output_file_path)
+print(f"\nFeature importance summary saved to {output_file_path}")
+
+# ----------------- Step3: Evaluate UTS, Kt, and E as a whole objective -----------------
+
+shap_values_combined = shap.Explanation(
+    values=np.sum(shap_values.values, axis=2),  
+    base_values=np.sum(shap_values.base_values, axis=1),  
+    data=X_test,
+    feature_names=selected_columns[:15]  
+)
+
+
+shap.summary_plot(shap_values_combined, X_test, feature_names=selected_columns[:15], plot_type="bar", show=False)
+plt.title("Feature Importance for Combined Target (UTS + Kt)")
+plt.show()
+
+
+shap.summary_plot(shap_values_combined, X_test, feature_names=selected_columns[:15], plot_type="layered_violin", show=False)
+plt.title("SHAP Summary Plot for Combined Target (UTS + Kt)")
+plt.show()
+
+
+clust_combined = shap.utils.hclust(X_test, np.sum(y_test, axis=1), linkage="single")  # 对整体目标进行层次聚类
+shap.plots.bar(shap_values_combined, clustering=clust_combined, clustering_cutoff=1, show=False)
+plt.title("Hierarchical Clustering + SHAP for Combined Target (UTS + Kt)")
+plt.show()
+
+
+avg_shap_values_combined = np.abs(shap_values_combined.values).mean(axis=0)
+feature_importance_combined = pd.DataFrame({
+    'Feature': selected_columns[:15],
+    'Average_SHAP_Value': avg_shap_values_combined
+})
+
+
+feature_importance_combined = feature_importance_combined.sort_values(by='Average_SHAP_Value', ascending=False)
+
+
+print("\nFeature Importance for Combined Target (UTS + Kt):")
+print(feature_importance_combined)
+
+
+output_file_path_combined = r'G:\Article_IIII_final\Code\Feature_project\Output\feature_importance_combined.xlsx'
+feature_importance_combined.to_excel(output_file_path_combined, index=False)
+print(f"\nFeature importance for combined target saved to {output_file_path_combined}")
+
+
